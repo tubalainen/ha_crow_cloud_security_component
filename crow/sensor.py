@@ -8,11 +8,21 @@ import logging
 import copy
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import TEMP_CELSIUS, PRESSURE_HPA, PERCENTAGE, CONCENTRATION_MICROGRAMS_PER_CUBIC_METER
+from homeassistant.const import (
+    UnitOfTemperature,
+    UnitOfPressure,
+    PERCENTAGE,
+    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
-# from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .consts import (DOMAIN)
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorDeviceClass,
+    SensorStateClass,
+)
+
+from .consts import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,37 +33,32 @@ INTERFACE_GAS_LEVEL = 61
 INTERFACE_GAS_VALUE = 62  # Fake virtual dect_interface number
 
 iface_labels = {
-    INTERFACE_TEMPERATURE: 'Temperature',
-    INTERFACE_HUMIDITY: 'Humidity',
-    INTERFACE_AIR_PRESSURE: 'Air Pressure',
-    INTERFACE_GAS_VALUE: 'Gas Value',
-    INTERFACE_GAS_LEVEL: 'Gas Level',
+    INTERFACE_TEMPERATURE: "Temperature",
+    INTERFACE_HUMIDITY: "Humidity",
+    INTERFACE_AIR_PRESSURE: "Air Pressure",
+    INTERFACE_GAS_VALUE: "Gas Value",
+    INTERFACE_GAS_LEVEL: "Gas Level",
 }
 
 iface_to_device_type = {
-    INTERFACE_TEMPERATURE: 'temperature',
-    INTERFACE_HUMIDITY: 'humidity',
-    INTERFACE_AIR_PRESSURE: 'pressure',
-    INTERFACE_GAS_VALUE: 'carbon_dioxide',
-    INTERFACE_GAS_LEVEL: None,
-}
-
-iface_to_value_name = {
-    INTERFACE_TEMPERATURE: 'temperature',
-    INTERFACE_HUMIDITY: 'humidity',
-    INTERFACE_AIR_PRESSURE: 'air_pressure',
-    INTERFACE_GAS_VALUE: 'carbon_dioxide',
+    INTERFACE_TEMPERATURE: (SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT),
+    INTERFACE_HUMIDITY: (SensorDeviceClass.HUMIDITY, SensorStateClass.MEASUREMENT),
+    INTERFACE_AIR_PRESSURE: (SensorDeviceClass.PRESSURE, SensorStateClass.MEASUREMENT),
+    INTERFACE_GAS_VALUE: (
+        SensorDeviceClass.CO2,
+        SensorStateClass.MEASUREMENT,
+    ),
     INTERFACE_GAS_LEVEL: None,
 }
 
 # GAS Sensor IDT ZMOD 4410
 # We have 5 levels of VOC (Volatile Organic Compounds)
 GAS_LEVEL = {
-    0: 'Clean',
-    1: 'Good',
-    2: 'Moderate',
-    3: 'Bad',
-    4: 'Very Bad',
+    0: "Clean",
+    1: "Good",
+    2: "Moderate",
+    3: "Bad",
+    4: "Very Bad",
 }
 
 
@@ -61,51 +66,61 @@ def get_iface_value(iface, data):
     if data is None:
         return None
     if iface == INTERFACE_AIR_PRESSURE:
-        return data['air_pressure']
+        return data["air_pressure"]
     elif iface == INTERFACE_TEMPERATURE:
-        return round(data['temperature'] / 10) / 10
+        return round(data["temperature"] / 10) / 10
     elif iface == INTERFACE_HUMIDITY:
-        return round(data['humidity'] / 10) / 10
+        return round(data["humidity"] / 10) / 10
     elif iface == INTERFACE_GAS_VALUE:
-        return data['gas_value']
+        return data["gas_value"]
     elif iface == INTERFACE_GAS_LEVEL:
-        return GAS_LEVEL.get(data['gas_level'])
+        return GAS_LEVEL.get(data["gas_level"])
     return None
 
 
 def get_iface_unit(iface):
     if iface == INTERFACE_AIR_PRESSURE:
-        return PRESSURE_HPA
+        return UnitOfPressure.HPA
     elif iface == INTERFACE_TEMPERATURE:
-        return TEMP_CELSIUS
+        return UnitOfTemperature.CELSIUS
     elif iface == INTERFACE_HUMIDITY:
         return PERCENTAGE
     elif iface == INTERFACE_GAS_LEVEL:
-        return ''
+        return ""  # No unit for gas level
     elif iface == INTERFACE_GAS_VALUE:
         return CONCENTRATION_MICROGRAMS_PER_CUBIC_METER
     return None
 
 
 async def async_setup_entry(
-        hass: HomeAssistant,
-        entry: ConfigEntry,
-        async_add_entities,
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ):
     hub = hass.data[DOMAIN]
     measurements = await hub.get_measurements()
     sensor_defs = []
-    for sensor in hub.get(measurements, '$..values.*'):
-
-        if sensor['_id']['dect_interface'] == INTERFACE_GAS_LEVEL:
-            for dect_interface in (INTERFACE_TEMPERATURE, INTERFACE_HUMIDITY,
-                                   INTERFACE_AIR_PRESSURE, INTERFACE_GAS_LEVEL, INTERFACE_GAS_VALUE):
+    for sensor in hub.get(measurements, "$..values.*"):
+        if sensor["_id"]["dect_interface"] == INTERFACE_GAS_LEVEL:
+            for dect_interface in (
+                INTERFACE_TEMPERATURE,
+                INTERFACE_HUMIDITY,
+                INTERFACE_AIR_PRESSURE,
+                INTERFACE_GAS_LEVEL,
+                INTERFACE_GAS_VALUE,
+            ):
                 s = copy.deepcopy(sensor)
-                s['name'] = measurements.get(str(hub.get_first(sensor, '$._id.device_id'))).get('name')
-                s['_id']['dect_interface'] = dect_interface
+                s["name"] = (
+                    measurements.get(str(hub.get_first(sensor, "$._id.device_id")))
+                ).get("name")
+                s["_id"]["dect_interface"] = dect_interface
+                s["unique_id"] = f"{s['_id']['device_id']}-{dect_interface}"
                 sensor_defs.append(s)
         else:
-            sensor['name'] = measurements.get(str(hub.get_first(sensor, '$._id.device_id'))).get('name')
+            sensor["name"] = (
+                measurements.get(str(hub.get_first(sensor, "$._id.device_id")))
+            ).get("name")
+            sensor["unique_id"] = (
+                f"{sensor['_id']['device_id']}-{sensor['_id']['dect_interface']}"
+            )
             sensor_defs.append(sensor)
 
     sensors = [CrowSensor(hub, sensor) for sensor in sensor_defs]
@@ -113,35 +128,33 @@ async def async_setup_entry(
     async_add_entities(sensors)
 
 
-class CrowSensor(Entity):
-    """Representation of a Crow thermometer."""
+class CrowSensor(SensorEntity):
+    """Representation of a Crow sensor."""
 
     def __init__(self, hub, sensor):
         """Initialize the sensor."""
         _LOGGER.debug("Init crow sensor: %s", sensor)
         self._hub = hub
         self.value = None
-        self._report_type = hub.get_first(sensor, '$._id.report_type')
-        self._device_id = hub.get_first(sensor, '$._id.device_id')
-        self._interface_type = hub.get_first(sensor, '$._id.dect_interface')
-        # self._device_label = "{} - {}".format(sensor['name'], iface_labels.get(self._interface_type))
-        self._device_label = sensor['name']
+        self._report_type = hub.get_first(sensor, "$._id.report_type")
+        self._device_id = hub.get_first(sensor, "$._id.device_id")
+        self._interface_type = hub.get_first(sensor, "$._id.dect_interface")
+        self._device_label = sensor["name"]
         self.value = get_iface_value(self._interface_type, sensor)
-        self._attr_device_class = iface_to_device_type.get(self._interface_type)
-        _LOGGER.info('Sensor[{}]: {}, {}'.format(sensor['name'], self._interface_type, self._device_label))
+        if iface_to_device_type.get(self._interface_type):
+            self._attr_device_class = iface_to_device_type.get(self._interface_type)[0]
+            self._attr_state_class = iface_to_device_type.get(self._interface_type)[1]
+        self._attr_unique_id = sensor["unique_id"]
+        self._attr_name = f"{self._device_label} {iface_labels.get(self._interface_type, '')}"
+        self._attr_icon = self._get_icon()
+        _LOGGER.info(
+            "Sensor[{}]: {}, {}".format(
+                sensor["name"], self._interface_type, self._device_label
+            )
+        )
 
     @property
-    def name(self):
-        """Return the name of the device."""
-        return self._device_label
-
-    @property
-    def unique_id(self):
-        return self._device_id
-
-    @property
-    def state(self):
-        """Return the state of the device."""
+    def native_value(self):
         return self.value
 
     @property
@@ -150,31 +163,33 @@ class CrowSensor(Entity):
 
     @property
     def available(self):
-        """Return True if entity is available."""
         return self.value is not None
 
     @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement of this entity."""
+    def native_unit_of_measurement(self):
         return get_iface_unit(self._interface_type)
 
     def update_callback(self, msg):
-        _LOGGER.debug('Got update for {}: '.format((self.name,)), msg)
-        data = msg.get('data', {})
+        _LOGGER.debug("Got update for %s: %s", self.name, msg)
+        data = msg.get("data", {})
         if data:
             self.value = get_iface_value(self._interface_type, data)
             self.async_write_ha_state()
 
     async def async_added_to_hass(self):
         """Subscribe to sensors events."""
-        _LOGGER.debug('Added to hass: {}'.format((self.name,)))
+        _LOGGER.debug("Added to hass: %s", self.name)
         self._hub.subscribe(self._device_id, self.update_callback)
 
-    # async def async_update(self):
-    #     """Update the sensor."""
-    #     _LOGGER.debug('Update called for {}'.format((self.name,)))
-    #     measurements = await self._hub.get_measurements()
-    #     data = self._hub.get_first(measurements,
-    #                                '$.%d.values.[?(@._id.dect_interface==%d)]',
-    #                                self._device_id, self._report_type)
-    #     self.value = get_iface_value(self._interface_type, data)
+    def _get_icon(self):
+        if self._interface_type == INTERFACE_TEMPERATURE:
+            return "mdi:thermometer"
+        elif self._interface_type == INTERFACE_HUMIDITY:
+            return "mdi:water-percent"
+        elif self._interface_type == INTERFACE_AIR_PRESSURE:
+            return "mdi:gauge"
+        elif self._interface_type == INTERFACE_GAS_VALUE:
+            return "mdi:molecule-co2"
+        elif self._interface_type == INTERFACE_GAS_LEVEL:
+            return "mdi:fan-alert"
+        return None
