@@ -3,7 +3,7 @@ Shepard Crow Security Custom Component
 
 This repository is a re-vival of the deleteted custom component repository from @shprota.
 
-It has an updated alarm_control_panel.py component that works with Home Assistant 2025.x
+It has an updated alarm_control_panel.py and sensor.py component that works with Home Assistant 2025.x
 
 Installation is made manually, copy the crow folder into your custom_components folder, restart and then add the component.
 
