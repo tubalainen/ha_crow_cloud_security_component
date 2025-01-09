@@ -5,30 +5,21 @@ import logging
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    STATE_ALARM_ARMED_AWAY, STATE_ALARM_ARMED_HOME, STATE_ALARM_DISARMED, STATE_ALARM_ARMING,
-    STATE_UNKNOWN)
-
-from homeassistant.components.alarm_control_panel.const import (
-    SUPPORT_ALARM_ARM_AWAY,
-    SUPPORT_ALARM_ARM_HOME,
-    SUPPORT_ALARM_TRIGGER, SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
-)
+from homeassistant.components.alarm_control_panel import AlarmControlPanelState, AlarmControlPanelEntityFeature
 from homeassistant.core import HomeAssistant
-# from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .consts import (DOMAIN)
+from .consts import DOMAIN
 import crow_security as crow
 
 
 _LOGGER = logging.getLogger(__name__)
 
-
+# State mappings (using AlarmControlPanelState)
 state_map = {
-    'armed': STATE_ALARM_ARMED_AWAY,
-    'arm in progress': STATE_ALARM_ARMING,
-    'stay arm in progress': STATE_ALARM_ARMING,
-    'stay_armed': STATE_ALARM_ARMED_HOME,
-    'disarmed': STATE_ALARM_DISARMED,
+    'armed': AlarmControlPanelState.ARMED_AWAY,
+    'arm in progress': AlarmControlPanelState.ARMING,
+    'stay arm in progress': AlarmControlPanelState.ARMING,
+    'stay_armed': AlarmControlPanelState.ARMED_HOME,
+    'disarmed': AlarmControlPanelState.DISARMED,
 }
 
 set_state_map = {
@@ -36,7 +27,6 @@ set_state_map = {
     "ARMED_AWAY": "arm",
     "DISARM": "disarm",
 }
-
 
 async def async_setup_entry(
         hass: HomeAssistant,
@@ -47,8 +37,6 @@ async def async_setup_entry(
     alarms = []
     areas = await hub.panel.get_areas()
     alarms.extend([CrowAlarm(hub.panel, area) for area in areas])
-
-    # hub.update_overview()
     async_add_entities(alarms)
 
 
@@ -56,12 +44,11 @@ class CrowAlarm(alarm.AlarmControlPanelEntity):
     """Representation of a Crow alarm status."""
 
     def __init__(self, panel: crow.Panel, area):
-        """Initalize the Crow alarm panel."""
+        """Initialize the Crow alarm panel."""
         self._panel = panel
         self._area = area
-        self._state = state_map.get(self._area.get('state'), STATE_UNKNOWN)
-        # self._digits = 4
-        # self._changed_by = None
+        # Use DISARMED as the fallback state if not found in state_map
+        self._state = state_map.get(self._area.get('state'), AlarmControlPanelState.DISARMED)
 
     @property
     def name(self):
@@ -73,43 +60,42 @@ class CrowAlarm(alarm.AlarmControlPanelEntity):
         """Return the state of the device."""
         return self._state
 
-    # @property
-    # def code_format(self):
-    #     """Return the code format as regex."""
-    #     return '^\\d{%s}$' % self._digits
+    @property
+    def alarm_state(self):
+        """Return the current state of the alarm."""
+        return self._state
 
     async def async_update(self):
         """Update alarm status."""
         tmp = await self._panel.get_area(self._area.get('id'))
         _LOGGER.debug("Area type is %s" % type(tmp))
-        if tmp is not None and type(tmp) == dict:
+        if tmp is not None and isinstance(tmp, dict):
             self._area = tmp
         _LOGGER.debug("Updating Crow area %s" % self._area.get('name'))
 
-        self._state = state_map.get(self._area.get('state'), STATE_UNKNOWN)
-        if self._state == STATE_UNKNOWN:
+        # Use DISARMED as fallback state if the state is unknown
+        self._state = state_map.get(self._area.get('state'), AlarmControlPanelState.DISARMED)
+        if self._state == AlarmControlPanelState.DISARMED:
             _LOGGER.error('Unknown alarm state %s', self._area.get('state'))
 
     async def async_alarm_disarm(self, code=None):
         """Send disarm command."""
-        await self._async_set_arm_state('DISARMED', code)
+        await self._async_set_arm_state(AlarmControlPanelState.DISARMED, code)
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
-        await self._async_set_arm_state('ARMED_HOME', code)
+        await self._async_set_arm_state(AlarmControlPanelState.ARMED_HOME, code)
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
-        await self._async_set_arm_state('ARMED_AWAY', code)
+        await self._async_set_arm_state(AlarmControlPanelState.ARMED_AWAY, code)
 
     async def async_alarm_trigger(self, code=None):
+        """Trigger alarm."""
         pass
 
     async def async_alarm_arm_custom_bypass(self, code=None):
-        pass
-
-    def alarm_trigger(self, code=None):
-        _LOGGER.info('Crow alarm trigger')
+        """Custom bypass command."""
         pass
 
     async def _async_set_arm_state(self, state, code=None):
@@ -127,4 +113,9 @@ class CrowAlarm(alarm.AlarmControlPanelEntity):
     @property
     def supported_features(self) -> int:
         """Return the list of supported features."""
-        return SUPPORT_ALARM_ARM_HOME | SUPPORT_ALARM_ARM_AWAY | SUPPORT_ALARM_ARM_CUSTOM_BYPASS | SUPPORT_ALARM_TRIGGER
+        return (
+            AlarmControlPanelEntityFeature.ARM_HOME |
+            AlarmControlPanelEntityFeature.ARM_AWAY |
+            AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS |
+            AlarmControlPanelEntityFeature.TRIGGER
+        )
