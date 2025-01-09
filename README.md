@@ -1,5 +1,5 @@
 # ha_crow_cloud_security_component
-Shepard Crow Security Custom Component
+Shepard Crow Security Custom Component, works with the Crow Cloud API. No local access. https://www.thecrowgroup.com/
 
 This repository is a re-vival of the deleteted custom component repository from @shprota.
 
